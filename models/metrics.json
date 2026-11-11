@@ -1,0 +1,33 @@
+{
+  "metrics": {
+    "test_rows": 1200,
+    "MAE": 23774.166666666668,
+    "MAPE": 0.06222957070914795,
+    "median_APE": 0.051427105483089486,
+    "within_10pct": 0.7958333333333333,
+    "R2_log": 0.9604256996418779,
+    "interval_80_coverage": 0.8175,
+    "baseline_ppsf_MAPE": 0.148718423400285
+  },
+  "importances": {
+    "hood_x_sqft": 1.2716,
+    "effective_age": 0.1155,
+    "condition": 0.0735,
+    "garage": 0.0191,
+    "hood_ppsf": 0.019,
+    "school_rating": 0.016,
+    "pool": 0.0093,
+    "view": 0.0041,
+    "age": 0.0037,
+    "cond_x_age": 0.0022,
+    "log_sqft": 0.0015,
+    "bath_bed_ratio": 0.0004,
+    "baths": 0.0002,
+    "log_lot": 0.0001,
+    "dist_center_km": 0.0001,
+    "beds": -0.0,
+    "renovated": -0.0,
+    "lot_to_sqft": -0.0,
+    "sqft_per_bed": -0.0001
+  }
+}
