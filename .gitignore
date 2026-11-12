@@ -16,3 +16,6 @@ models/*.joblib
 # Editor / OS
 .vscode/
 .DS_Store
+
+# Streamlit secrets (API keys) - never commit
+.streamlit/secrets.toml

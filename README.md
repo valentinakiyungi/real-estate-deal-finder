@@ -1,37 +1,44 @@
-# Real-Estate Price & Deal Finder
+# DealScout: Real-Estate Price & Deal Finder
 
-An end-to-end project combining classic ML, GenAI and an agent:
+Find homes listed below what they're worth. An end-to-end project combining classic ML, GenAI, an agent
+and a multi-page web app:
 
 | Layer | What it does | Where |
 |---|---|---|
 | **ML** | Gradient-boosted house-price model on log price with feature engineering; conformalised quantile models give a calibrated 80% fair-value band | `dealfinder/model.py` |
 | **GenAI** | Turns messy listing text ("3bd / 2 full + 1 half bath… 1760 sqft lot… approx 2,110 SF… cash only") into validated structured features + red flags | `dealfinder/parser.py` |
 | **Agent** | Searches listings, parses and values each one, applies a risk haircut, separates clean deals from speculative ones and value traps, writes a report | `dealfinder/agent.py` |
-| **Web app** | Streamlit UI: find deals (sample or your CSV), value a single listing, model card | `app.py` |
+| **Web app** | DealScout site: landing page, deal cards + map + table, price check, watchlist with compare | `app.py`, `ui/` |
 
 ## Quick start
 
 ```bash
 python -m venv .venv && source .venv/bin/activate     # Windows: .venv\Scripts\Activate.ps1
 pip install -r requirements.txt
-streamlit run app.py                                  # opens the web app in your browser
+python -m streamlit run app.py                        # opens the site in your browser
 ```
 
 The first launch builds the data and trains the model (~10 s).
 
-### The web app
-- **Find deals:** run the agent over the sample market or **your own CSV** (download the template in the
-  app; only `description` and `asking_price` are required). See a chart of asking price vs fair value, ranked
-  deals, speculative listings, value traps, the agent's log, and download the report (HTML/Markdown) or all
-  results (CSV).
-- **Value a listing:** paste any listing text and get the parsed facts, fair value, 80% range, risk-adjusted
-  value and a verdict.
-- **Model:** accuracy figures and what drives price.
+### The site
+| Page | What it does |
+|---|---|
+| **Home** | Hero with a live example, how it works, the biggest gaps right now, and a "cheap for a reason" example |
+| **Deals** | Filter by neighborhood, price, bedrooms and verdict; view as **cards**, a **map** or a **table**; upload your own CSV; run the AI analyst; download the report or results |
+| **Check a price** | Paste any listing and asking price; get our estimate, likely range, value after risks and a verdict |
+| **Watchlist** | Save homes from anywhere, compare up to 4 side by side, download as CSV |
+| **How it works** | Accuracy, what each label means, how risk is priced in, what drives price, limits |
+
+Every property gets a line-drawn front elevation generated from its data (width from bedrooms, a second
+storey for larger homes, garage, pool, a chimney on older homes), and a **price gap bar**: our likely range
+as a band, the asking price as a dot. Design: Archivo type, survey-drawing palette, defined in
+`ui/theme.py` and `.streamlit/config.toml`. To rename the product, change `BRAND` in `ui/theme.py`.
 
 ### Turning on AI (free Gemini key)
 1. Get a free key at <https://aistudio.google.com/apikey>.
 2. Copy `.env.example` to `.env` and paste the key: `GEMINI_API_KEY=...`
-3. Restart the app. The sidebar shows "AI connected".
+3. Restart the app. "Run the AI analyst" appears under "Change listings or run the AI analyst" on the
+   Deals page. The quick scan stays the default, because it's instant.
 
 `.env` is in `.gitignore`, so the key never reaches GitHub. With AI on, Gemini (1) parses descriptions,
 15 per request to stay inside free-tier rate limits, through a forced function call whose schema is the
@@ -41,6 +48,20 @@ errors are retried with back-off; if the AI still fails, the app falls back to t
 `ANTHROPIC_API_KEY` works too; `DEALFINDER_PROVIDER=gemini|anthropic` forces one. The API client is
 standard-library only (`dealfinder/llm.py`), no SDK required.
 
+### Put it online (free, Streamlit Community Cloud)
+1. Push this repo to GitHub.
+2. Go to <https://share.streamlit.io>, sign in with GitHub, and choose **Create app**, then
+   **Deploy a public app from GitHub**.
+3. Repository `your-name/real-estate-deal-finder`, branch `main`, main file `app.py`. Pick a URL such as
+   `dealscout.streamlit.app`.
+4. Open **Advanced settings**: choose Python 3.12, and in **Secrets** paste
+   `GEMINI_API_KEY = "your-key"` (with the quotes). Leave Secrets empty for a fully offline site.
+5. Click **Deploy**. The first start takes a few minutes while packages install and the model trains.
+
+Visitors share your free Gemini quota, so each visitor can run the AI analyst up to 3 times per visit
+(`AI_RUNS_PER_VISIT` in `ui/state.py`). Watchlists live in each visitor's browser session.
+`.streamlit/secrets.toml` is in `.gitignore` in case you test secrets locally.
+
 ### Command line
 ```bash
 python main.py train          # regenerate data + retrain
@@ -49,7 +70,7 @@ python main.py find --neighborhood "Cedar Hills" --max-price 400000
 python main.py find --csv my_listings.csv
 python main.py parse "3 bed / 1 full + 1 half bath, approx 1,480 SF, circa 1962, needs TLC, cash only"
 python main.py evaluate       # accuracy against hidden ground truth
-pytest -q                     # 12 tests, including simulated Gemini round-trips
+pytest -q                     # 18 tests, including simulated Gemini round-trips
 ```
 
 ## How a listing is judged
