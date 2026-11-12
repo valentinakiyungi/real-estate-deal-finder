@@ -114,3 +114,23 @@ def test_agent_falls_back_when_api_down(gemini, monkeypatch):
     tools = DealTools(data.active_listings(n=15, seed=8), model)
     note = run_llm_agent(tools, {"max_price": 500000})
     assert "built-in planner" in note and tools.report is not None
+
+
+def test_timeout_becomes_fallback_not_crash(gemini, monkeypatch):
+    """Reproduces the user's TimeoutError: urlopen times out on every call."""
+    import urllib.request
+    calls = []
+
+    def slow(*a, **k):
+        calls.append(1)
+        raise TimeoutError("The read operation timed out")
+    monkeypatch.setattr(llm, "_post", llm._post.__wrapped__ if hasattr(llm._post, "__wrapped__") else llm._post)
+    monkeypatch.setattr(urllib.request, "urlopen", slow)
+    with pytest.raises(llm.LLMError, match="no response"):
+        llm._post("https://generativelanguage.googleapis.com/x", {}, {"x-goog-api-key": "k"})
+    assert len(calls) == 2  # one retry, then give up
+
+    model = PriceModel().fit(data.historical_sales(n=1200, seed=3))
+    tools = DealTools(data.active_listings(n=15, seed=8), model)
+    note = run_llm_agent(tools, {})
+    assert "built-in planner" in note and tools.report is not None

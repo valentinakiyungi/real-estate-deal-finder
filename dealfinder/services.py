@@ -25,9 +25,12 @@ def ensure_data_and_model(force: bool = False) -> PriceModel:
         SALES_PATH.parent.mkdir(exist_ok=True)
         data.historical_sales().to_csv(SALES_PATH, index=False)
         data.active_listings().to_json(LISTINGS_PATH, orient="records", indent=1)
-    if force or not MODEL_PATH.exists():
-        return train_and_evaluate(pd.read_csv(SALES_PATH), MODEL_PATH.parent)
-    return PriceModel.load(MODEL_PATH)
+    if not force and MODEL_PATH.exists():
+        try:
+            return PriceModel.load(MODEL_PATH)
+        except Exception:
+            pass  # saved with different numpy/scikit-learn versions -> retrain below
+    return train_and_evaluate(pd.read_csv(SALES_PATH), MODEL_PATH.parent)
 
 
 def neighborhoods() -> list[str]:

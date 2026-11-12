@@ -198,7 +198,7 @@ def run_llm_agent(tools: DealTools, filters: dict, max_turns: int = 12) -> str:
             if tools.report:
                 return "llm"
         note = "AI agent stopped without submitting a report; used the built-in planner instead."
-    except llm.LLMError as e:
+    except Exception as e:  # any AI failure (timeout, quota, bad reply) -> offline planner, never a crash
         note = f"AI agent unavailable ({str(e)[:160]}); used the built-in planner instead."
     tools.on_event(note)
     tools.report = None

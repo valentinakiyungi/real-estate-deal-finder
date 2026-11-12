@@ -15,6 +15,7 @@ signatures" Gemini 3 models require to be sent back on later turns.
 """
 from __future__ import annotations
 
+import http.client
 import json
 import os
 import time
@@ -78,13 +79,17 @@ class LLMError(RuntimeError):
     pass
 
 
+TIMEOUT = float(os.environ.get("DEALFINDER_TIMEOUT", "90"))  # seconds per request
+
+
 def _post(url: str, body: dict, headers: dict, retries: int = 5) -> dict:
     data = json.dumps(body).encode()
+    timeouts = 0
     for attempt in range(retries):
         req = urllib.request.Request(url, data=data, method="POST",
                                      headers={"content-type": "application/json", **headers})
         try:
-            with urllib.request.urlopen(req, timeout=120) as r:
+            with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
                 return json.loads(r.read())
         except urllib.error.HTTPError as e:
             detail = e.read().decode(errors="replace")[:500]
@@ -98,6 +103,12 @@ def _post(url: str, body: dict, headers: dict, retries: int = 5) -> dict:
                 time.sleep(2 * (attempt + 1))
                 continue
             raise LLMError(f"network error: {e.reason}") from None
+        except (TimeoutError, OSError, http.client.HTTPException, ValueError) as e:
+            # slow/dropped connection or garbled reply: retry once, then give up so the app can fall back
+            timeouts += 1
+            if timeouts < 2 and attempt < retries - 1:
+                continue
+            raise LLMError(f"no response from the AI ({type(e).__name__}: {e})") from None
     raise LLMError("unreachable")
 
 
