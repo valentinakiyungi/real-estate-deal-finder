@@ -23,7 +23,7 @@ import pandas as pd
 
 from . import llm
 from .model import PriceModel
-from .parser import parse
+from .parser import parse_many
 
 # Rough cost of each risk as a share of value (what a buyer should haircut).
 RISK_HAIRCUT = {
@@ -39,10 +39,12 @@ def _haircut(flags: list[str]) -> float:
 
 
 class DealTools:
-    def __init__(self, listings: pd.DataFrame, model: PriceModel, use_llm_parser: bool | None = None):
+    def __init__(self, listings: pd.DataFrame, model: PriceModel, use_llm_parser: bool | None = None,
+                 on_event=None):
         self.listings = listings.set_index("listing_id", drop=False)
         self.model = model
         self.use_llm_parser = use_llm_parser
+        self.on_event = on_event or (lambda msg: None)
         self.cache: dict[str, dict] = {}
         self.log: list[str] = []
         self.report: dict | None = None
@@ -67,17 +69,20 @@ class DealTools:
         return {k: (v.item() if hasattr(v, "item") else v) for k, v in r.items() if not str(k).startswith("_truth")}
 
     def analyze_listings(self, ids: list[str]) -> list[dict]:
-        out = []
-        for i in ids:
-            if i not in self.cache:
-                self.cache[i] = self._analyze_one(i)
-            out.append(self.cache[i])
+        ids = [i for i in dict.fromkeys(ids) if i in self.listings.index]  # dedupe, drop unknown ids
+        todo = [i for i in ids if i not in self.cache]
+        if todo:
+            self.on_event(f"Parsing {len(todo)} listing descriptions")
+            parsed = parse_many([(i, str(self.listings.at[i, "description"])) for i in todo],
+                                self.use_llm_parser, on_progress=self.on_event)
+            self.on_event(f"Valuing {len(todo)} listings with the price model")
+            for i in todo:
+                self.cache[i] = self._analyze_one(i, *parsed[i])
         self.log.append(f"analyze_listings({len(ids)} ids)")
-        return out
+        return [self.cache[i] for i in ids]
 
-    def _analyze_one(self, i: str) -> dict:
+    def _analyze_one(self, i: str, feats, meta) -> dict:
         r = self.listings.loc[i]
-        feats, meta = parse(r["description"], self.use_llm_parser)
         f = feats.model_dump()
         missing = [k for k in ("beds", "baths", "sqft", "year_built") if f[k] is None]
         res = {"id": i, "address": r["address"], "neighborhood": r["neighborhood"],
@@ -107,18 +112,26 @@ class DealTools:
         else:
             verdict = "fair"
         confidence = "high" if not meta["disagreements"] and est.fair_high / est.fair_low < 1.35 else "medium"
+        notes = []
         if len(meta["disagreements"]) >= 2:
             confidence = "low"
-        res.update(fair_value=int(est.fair_value), fair_low=int(est.fair_low), fair_high=int(est.fair_high),
+        if r["neighborhood"] not in self.model.fe.hood_te_:
+            confidence = "low"
+            notes.append(f"'{r['neighborhood']}' is not in the training data, so location is valued at the "
+                         "market average")
+        res.update(notes=notes,fair_value=int(est.fair_value), fair_low=int(est.fair_low), fair_high=int(est.fair_high),
                    risk_haircut=round(hc, 3), risk_adjusted_value=int(round(risk_adj, -3)),
                    discount_vs_fair=round(float(discount), 3), discount_vs_risk_adjusted=round(float(adj_discount), 3),
                    price_per_sqft=round(ask / f["sqft"]), verdict=verdict, confidence=confidence)
         return res
 
     def submit_report(self, deals: list[dict], market_summary: str) -> str:
-        self.report = {"deals": deals, "market_summary": market_summary}
-        self.log.append(f"submit_report({len(deals)} deals)")
-        return "report accepted"
+        # Only keep deals the tools actually analysed and valued (guards against invented ids).
+        valid = [d for d in deals if d.get("id") in self.cache and "fair_value" in self.cache[d["id"]]]
+        dropped = len(deals) - len(valid)
+        self.report = {"deals": valid, "market_summary": market_summary}
+        self.log.append(f"submit_report({len(valid)} deals{f', dropped {dropped} unknown ids' if dropped else ''})")
+        return "report accepted" + (f"; ignored {dropped} ids that were never analysed" if dropped else "")
 
 
 # ---------------------------------------------------------------- schemas ---
@@ -153,26 +166,44 @@ means verify. Rank deals best-first, then call submit_report. Be concrete and qu
 
 
 # ------------------------------------------------------------------ runner ---
-def run_llm_agent(tools: DealTools, goal: str, max_turns: int = 15) -> None:
-    msgs = [{"role": "user", "content": goal}]
-    for _ in range(max_turns):
-        resp = llm.messages(msgs, system=SYSTEM, tools=TOOL_SPECS, max_tokens=4000)
-        msgs.append({"role": "assistant", "content": resp["content"]})
-        calls = [b for b in resp["content"] if b["type"] == "tool_use"]
-        if not calls:
-            break
-        results = []
-        for c in calls:
-            try:
-                out = getattr(tools, c["name"])(**c["input"])
-            except Exception as e:
-                out = {"error": f"{type(e).__name__}: {e}"}
-            results.append({"type": "tool_result", "tool_use_id": c["id"], "content": json.dumps(out, default=str)})
-        msgs.append({"role": "user", "content": results})
-        if tools.report:
-            return
-    if not tools.report:  # model never submitted -> fall back so the user still gets a report
-        run_rule_agent(tools, goal_filters={})
+def build_goal(filters: dict) -> str:
+    crit = ", ".join(f"{k}={v}" for k, v in filters.items() if v) or "none — scan the whole market"
+    return f"Find the best under-priced homes for a buyer. Criteria: {crit}."
+
+
+def run_llm_agent(tools: DealTools, filters: dict, max_turns: int = 12) -> str:
+    """LLM-driven agent. Returns "llm" on success or a note explaining the fallback."""
+    allowed = {s["name"] for s in TOOL_SPECS}
+    msgs = [{"role": "user", "content": build_goal(filters)}]
+    try:
+        for turn in range(max_turns):
+            tools.on_event(f"AI agent thinking (step {turn + 1})")
+            resp = llm.messages(msgs, system=SYSTEM, tools=TOOL_SPECS, max_tokens=4000)
+            msgs.append({"role": "assistant", "content": resp["content"]})
+            calls = [b for b in resp["content"] if b["type"] == "tool_use"]
+            if not calls:
+                break
+            results = []
+            for c in calls:
+                tools.on_event(f"AI agent → {c['name']}")
+                try:
+                    if c["name"] not in allowed:
+                        raise ValueError(f"unknown tool {c['name']}")
+                    out = getattr(tools, c["name"])(**(c.get("input") or {}))
+                except Exception as e:
+                    out = {"error": f"{type(e).__name__}: {e}"}
+                results.append({"type": "tool_result", "tool_use_id": c["id"],
+                                "content": json.dumps(out, default=str)})
+            msgs.append({"role": "user", "content": results})
+            if tools.report:
+                return "llm"
+        note = "AI agent stopped without submitting a report; used the built-in planner instead."
+    except llm.LLMError as e:
+        note = f"AI agent unavailable ({str(e)[:160]}); used the built-in planner instead."
+    tools.on_event(note)
+    tools.report = None
+    run_rule_agent(tools, filters)
+    return note
 
 
 def run_rule_agent(tools: DealTools, goal_filters: dict) -> None:
@@ -193,18 +224,28 @@ def run_rule_agent(tools: DealTools, goal_filters: dict) -> None:
             "rationale": (f"Asking ${a['asking_price']:,} vs model fair value ${a['fair_value']:,} "
                           f"(80% band ${a['fair_low']:,}–${a['fair_high']:,}). "
                           + ("Asking is below the bottom of the band. " if a["asking_price"] < a["fair_low"] else "")
-                          + risk + f"On market {a['days_on_market']} days."),
+                          + risk + f"On market {a['days_on_market']} days."
+                          + "".join(f" Caution: {n}." for n in a.get("notes", []))),
             "next_steps": "Order an inspection and pull 3 recent comps within 1 km before offering.",
         })
     traps = [a for a in analyzed if a["verdict"] == "value trap"]
     spec = [a for a in analyzed if a["verdict"] == "speculative"]
     n_over = sum(a["verdict"] == "overpriced" for a in analyzed)
     common = pd.Series([fl for a in spec + traps for fl in a["features"]["red_flags"]]).value_counts().index[:3]
-    summary = (f"Scanned {len(analyzed)} listings. {len(deals)} clean listings are priced at least 10% below the "
-               f"model's fair value with no disclosed red flags. {len(spec)} more are cheap even after a risk haircut "
-               f"but carry problems such as {', '.join(common) or 'n/a'} — treat these as speculative. "
-               f"{len(traps)} are value traps whose discount is explained by their risks, and "
-               f"{n_over} are priced 10%+ above fair value.")
+    n = lambda k, one, many: f"{k} {one if k == 1 else many}"
+    parts = [f"Scanned {n(len(analyzed), 'listing', 'listings')}.",
+             f"{n(len(deals), 'clean listing is', 'clean listings are')} priced at least 10% below the model's "
+             "fair value with no disclosed red flags."]
+    if spec:
+        parts.append(f"{n(len(spec), 'more is', 'more are')} cheap even after a risk haircut but "
+                     f"{'carries' if len(spec) == 1 else 'carry'} problems such as {', '.join(common)} — "
+                     "treat as speculative.")
+    if traps:
+        parts.append(f"{n(len(traps), 'is a value trap', 'are value traps')} whose discount is explained by "
+                     "the disclosed risks.")
+    if n_over:
+        parts.append(f"{n(n_over, 'is', 'are')} priced 10%+ above fair value.")
+    summary = " ".join(parts)
     tools.submit_report(deals, summary)
 
 

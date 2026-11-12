@@ -101,28 +101,75 @@ def parse_rules(text: str) -> ListingFeatures:
 
 
 # ------------------------------------------------------------------- LLM ---
-def parse_llm(text: str) -> ListingFeatures:
+class _BatchItem(ListingFeatures):
+    id: str = Field(description="The listing id exactly as given")
+
+
+class _Batch(BaseModel):
+    listings: list[_BatchItem]
+
+
+BATCH_TOOL = {"name": "record_listings", "description": "Record the structured features of every listing given.",
+              "input_schema": _Batch.model_json_schema()}
+BATCH_SIZE = 15  # listings per request; keeps free-tier request counts low
+
+
+def parse_llm_batch(items: list[tuple[str, str]]) -> dict[str, ListingFeatures]:
+    """One LLM request for several (id, description) pairs."""
+    body = "\n\n".join(f"[{i}]\n{t}" for i, t in items)
     resp = llm.messages(
-        system=SYSTEM, tools=[TOOL], tool_choice={"type": "tool", "name": "record_listing"},
-        messages=[{"role": "user", "content": f"Listing description:\n<<<\n{text}\n>>>"}], max_tokens=800)
+        system=SYSTEM, tools=[BATCH_TOOL], tool_choice={"type": "tool", "name": "record_listings"},
+        messages=[{"role": "user", "content": f"Extract features for each of these {len(items)} listings. "
+                                              f"Return one entry per listing id.\n\n{body}"}],
+        max_tokens=400 * len(items) + 500)
     block = next(b for b in resp["content"] if b["type"] == "tool_use")
-    return ListingFeatures(**block["input"])
+    out = {}
+    for row in block["input"].get("listings", []):
+        try:
+            item = _BatchItem(**row)
+        except Exception:  # one malformed row shouldn't sink the batch
+            continue
+        out[item.id] = ListingFeatures(**item.model_dump(exclude={"id"}))
+    return out
+
+
+def _merge(ai: ListingFeatures, rules: ListingFeatures) -> tuple[ListingFeatures, list[str]]:
+    diffs = [k for k in ("beds", "baths", "sqft", "year_built", "garage_spaces", "condition")
+             if getattr(ai, k) is not None and getattr(ai, k) != getattr(rules, k)]
+    # fill any gaps the LLM left from the rule extractor
+    merged = ai.model_copy(update={k: getattr(rules, k) for k in ("beds", "baths", "sqft", "lot_sqft", "year_built")
+                                   if getattr(ai, k) is None})
+    return merged, diffs
+
+
+def parse_many(items: list[tuple[str, str]], use_llm: bool | None = None,
+               on_progress=None) -> dict[str, tuple[ListingFeatures, dict]]:
+    """Parse (id, description) pairs. Returns id -> (features, meta).
+
+    meta["source"] is "llm" or "rules"; meta["disagreements"] lists fields where the
+    LLM and the rule extractor disagree (used to lower confidence)."""
+    if use_llm is None:
+        use_llm = llm.available()
+    results = {i: (parse_rules(t), {"source": "rules", "disagreements": []}) for i, t in items}
+    if not use_llm:
+        return results
+    for start in range(0, len(items), BATCH_SIZE):
+        chunk = items[start:start + BATCH_SIZE]
+        if on_progress:
+            on_progress(f"AI parsing listings {start + 1}–{start + len(chunk)} of {len(items)}")
+        try:
+            got = parse_llm_batch(chunk)
+        except Exception as e:  # network / quota problems -> keep rule results for this chunk
+            for i, _ in chunk:
+                results[i] = (results[i][0], {"source": f"rules (AI failed: {str(e)[:80]})", "disagreements": []})
+            continue
+        for i, _ in chunk:
+            if i in got:
+                merged, diffs = _merge(got[i], results[i][0])
+                results[i] = (merged, {"source": "llm", "disagreements": diffs})
+    return results
 
 
 def parse(text: str, use_llm: bool | None = None) -> tuple[ListingFeatures, dict]:
-    """Return (features, meta). meta: source + fields where LLM and rules disagree."""
-    rules = parse_rules(text)
-    if use_llm is None:
-        use_llm = llm.available()
-    if not use_llm:
-        return rules, {"source": "rules", "disagreements": []}
-    try:
-        ai = parse_llm(text)
-    except Exception as e:  # network/API problems -> degrade gracefully
-        return rules, {"source": "rules (llm failed: %s)" % type(e).__name__, "disagreements": []}
-    diffs = [k for k in ("beds", "baths", "sqft", "year_built", "garage_spaces", "condition")
-             if getattr(ai, k) != getattr(rules, k)]
-    # fill gaps the LLM left from the rules
-    merged = ai.model_copy(update={k: getattr(rules, k) for k in ("beds", "baths", "sqft", "lot_sqft", "year_built")
-                                   if getattr(ai, k) is None})
-    return merged, {"source": "llm", "disagreements": diffs}
+    """Parse a single description. Returns (features, meta)."""
+    return parse_many([("listing", text)], use_llm)["listing"]

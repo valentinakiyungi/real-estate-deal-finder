@@ -6,59 +6,45 @@
     python main.py parse "3bd/2ba, 1,650 sq ft, built 1988, needs TLC, 2 car garage"
     python main.py evaluate                    # parser + deal-flag accuracy vs ground truth
 
-Set ANTHROPIC_API_KEY to let Claude parse listings and drive the agent;
-without it everything runs offline with the rule-based parser/planner.
+    streamlit run app.py                       # the web app
+
+Put GEMINI_API_KEY=... (free) or ANTHROPIC_API_KEY=... in a .env file to let the
+AI parse listings and drive the agent; without a key everything runs offline.
 """
 from __future__ import annotations
 
 import argparse
 import json
-from pathlib import Path
 
 import pandas as pd
 
-from dealfinder import data, llm
-from dealfinder.agent import DealTools, render_report, run_llm_agent, run_rule_agent
-from dealfinder.model import PriceModel, train_and_evaluate
+from dealfinder import llm, services
+from dealfinder.agent import DealTools
 from dealfinder.parser import parse
-
-ROOT = Path(__file__).resolve().parent
-MODEL = ROOT / "models" / "price_model.joblib"
-LISTINGS = ROOT / "data" / "active_listings.json"
 
 
 def cmd_train(_):
-    (ROOT / "data").mkdir(exist_ok=True)
-    sales = data.historical_sales()
-    sales.to_csv(ROOT / "data" / "historical_sales.csv", index=False)
-    data.active_listings().to_json(LISTINGS, orient="records", indent=1)
-    m = train_and_evaluate(sales, ROOT / "models")
+    m = services.ensure_data_and_model(force=True)
     print(json.dumps(m.metrics, indent=2))
 
 
 def _load():
-    if not MODEL.exists():
-        cmd_train(None)
-    return pd.read_json(LISTINGS), PriceModel.load(MODEL)
+    model = services.ensure_data_and_model()
+    return services.default_listings(), model
 
 
 def cmd_find(a):
     listings, model = _load()
-    tools = DealTools(listings, model, use_llm_parser=False if a.offline else None)
-    filters = {k: v for k, v in {"neighborhood": a.neighborhood, "max_price": a.max_price}.items() if v}
-    if llm.available() and not a.offline:
-        goal = ("Find the best under-priced homes for a buyer. Criteria: "
-                + (", ".join(f"{k}={v}" for k, v in filters.items()) or "none — scan the whole market") + ".")
-        print("agent: Claude (", llm.DEFAULT_MODEL, ")")
-        run_llm_agent(tools, goal)
-    else:
-        print("agent: offline planner (set ANTHROPIC_API_KEY for the Claude agent)")
-        run_rule_agent(tools, filters)
-    md, html = render_report(tools, ROOT / "reports", a.title)
-    print(tools.report["market_summary"])
-    for d in tools.report["deals"]:
+    if a.csv:
+        listings = services.prepare_listings(pd.read_csv(a.csv))
+    print("AI:", "off (--offline)" if a.offline else llm.describe())
+    res = services.run_search(listings, model, {"neighborhood": a.neighborhood, "max_price": a.max_price},
+                              use_ai=not a.offline, on_event=lambda m: print("  ·", m), title=a.title)
+    print("mode:", res["mode"])
+    print(res["tools"].report["market_summary"])
+    for d in res["tools"].report["deals"]:
         print(" -", d["id"], d["headline"])
-    print("report:", md, "|", html)
+    print("report:", services.REPORT_DIR / "deal_report.html")
 
 
 def cmd_parse(a):
@@ -91,6 +77,7 @@ if __name__ == "__main__":
     f.add_argument("--neighborhood")
     f.add_argument("--max-price", type=int)
     f.add_argument("--offline", action="store_true", help="never call the LLM")
+    f.add_argument("--csv", help="your own listings CSV (needs description, asking_price)")
     f.add_argument("--title", default="Under-priced Homes — Deal Report")
     f.set_defaults(fn=cmd_find)
     pp = sub.add_parser("parse")

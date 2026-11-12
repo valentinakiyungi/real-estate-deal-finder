@@ -2,7 +2,7 @@
 _Generated 11 Nov 2026_
 
 ## Summary
-Scanned 60 listings. 7 clean listings are priced at least 10% below the model's fair value with no disclosed red flags. 9 more are cheap even after a risk haircut but carry problems such as tenant occupied, roof end of life, unpermitted work — treat these as speculative. 2 are value traps whose discount is explained by their risks, and 14 are priced 10%+ above fair value.
+Scanned 60 listings. 7 clean listings are priced at least 10% below the model's fair value with no disclosed red flags. 9 more are cheap even after a risk haircut but carry problems such as tenant occupied, roof end of life, unpermitted work — treat as speculative. 2 are value traps whose discount is explained by the disclosed risks. 14 are priced 10%+ above fair value.
 
 ## Ranked deals
 
