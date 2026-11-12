@@ -142,6 +142,15 @@ VERDICTS = {
 }
 DEAL_VERDICTS = ("strong deal", "deal")
 
+# Plain-English names for the model's features (How it works page, static site)
+FEATURE_LABELS = {"hood_x_sqft": "Location and size together", "effective_age": "Age (since last renovation)",
+    "condition": "Condition", "garage": "Garage spaces", "hood_ppsf": "Neighborhood price level",
+    "school_rating": "School rating", "pool": "Pool", "view": "View", "log_sqft": "Living area",
+    "cond_x_age": "Condition for its age", "dist_center_km": "Distance to centre", "log_lot": "Lot size",
+    "baths": "Bathrooms", "beds": "Bedrooms", "age": "Age", "renovated": "Renovated",
+    "sqft_per_bed": "Space per bedroom", "bath_bed_ratio": "Bathrooms per bedroom",
+    "lot_to_sqft": "Lot relative to house"}
+
 # The sample market is simulated; pins are placed around this point for illustration.
 MAP_CENTER = (39.9612, -82.9988)
 _BEARING = {"Riverside": 200, "Old Town": 25, "Maple Heights": 295, "Lakeview": 75, "Eastgate": 110,

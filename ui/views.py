@@ -82,7 +82,8 @@ def card_grid(frame: pd.DataFrame, key: str, cols: int = 3, notes: dict | None =
     for start in range(0, len(rows), cols):
         for col, r in zip(st.columns(cols, gap="medium"), rows[start:start + cols]):
             d = r.to_dict()
-            with col, st.container(border=True):
+            # the key adds a CSS class (st-key-card-...) so phones keep Details/Save side by side
+            with col, st.container(border=True, key=f"card-{key}-{d['id']}"):
                 _html(c.card_html(d))
                 b1, b2 = st.columns(2)
                 with b1.popover("Details"):
@@ -233,7 +234,8 @@ def deals() -> None:
     hi = int(-(-f["asking_price"].max() // 10_000) * 10_000)
     price = c2.slider("Asking price", lo, hi, (lo, hi), step=10_000, format="$%d") if hi > lo else (lo, hi)
     beds = c3.selectbox("Bedrooms", ["Any", "1+", "2+", "3+", "4+", "5+"])
-    sort = c4.selectbox("Sort by", ["Biggest gap", "Lowest price", "Highest price", "Newest listings"])
+    sort = c4.selectbox("Sort by", ["Best deals first", "Biggest gap", "Lowest price", "Highest price",
+                                     "Newest listings"])
     present = [v for v in FILTER_VERDICTS if v in set(f["verdict"])]
     shown = st.pills("Show", present, default=[v for v in DEFAULT_SHOWN if v in present],
                      selection_mode="multi", format_func=services.verdict_label)
@@ -245,9 +247,11 @@ def deals() -> None:
     if beds != "Any":
         view = view[view["beds"].fillna(0) >= int(beds[0])]
     view = view[view["verdict"].isin(shown or [])]
-    order = {"Biggest gap": ("discount", False), "Lowest price": ("asking_price", True),
+    view["_tier"] = view["verdict"].map({v: i for i, v in enumerate(FILTER_VERDICTS)})
+    order = {"Best deals first": (["_tier", "discount"], [True, False]), "Biggest gap": ("discount", False),
+             "Lowest price": ("asking_price", True),
              "Highest price": ("asking_price", False), "Newest listings": ("days_on_market", True)}[sort]
-    view = view.sort_values(order[0], ascending=order[1], na_position="last")
+    view = view.sort_values(order[0], ascending=order[1], na_position="last").drop(columns="_tier")
 
     top = st.columns([3, 1.3])
     top[0].markdown(f"**{len(view)} of {len(f)} homes** match.")
@@ -269,7 +273,7 @@ def deals() -> None:
             st.info("None of these homes has a location. Add lat and lon columns to your CSV to map them.")
         else:
             legend()
-            st.pydeck_chart(deck, height=560)
+            st.pydeck_chart(deck, height=480)
             missing = int(view[["lat", "lon"]].isna().any(axis=1).sum())
             st.caption("Hover a pin for details. Pin positions in the sample market are illustrative."
                        + (f" {missing} homes without a location aren't shown." if missing else ""))
@@ -429,13 +433,7 @@ def method() -> None:
              "4%, roof at end of life 3%, up to 35% in total.")
 
     st.markdown("## What drives price in the model")
-    nice = {"hood_x_sqft": "Location and size together", "effective_age": "Age (since last renovation)",
-            "condition": "Condition", "garage": "Garage spaces", "hood_ppsf": "Neighborhood price level",
-            "school_rating": "School rating", "pool": "Pool", "view": "View", "log_sqft": "Living area",
-            "cond_x_age": "Condition for its age", "dist_center_km": "Distance to centre", "log_lot": "Lot size",
-            "baths": "Bathrooms", "beds": "Bedrooms", "age": "Age", "renovated": "Renovated",
-            "sqft_per_bed": "Space per bedroom", "bath_bed_ratio": "Bathrooms per bedroom",
-            "lot_to_sqft": "Lot relative to house"}
+    nice = services.FEATURE_LABELS
     imp = pd.DataFrame({"Factor": [nice.get(k, k) for k in model.importances],
                         "Importance": list(model.importances.values())})
     imp = imp[imp["Importance"] > 0].head(10)

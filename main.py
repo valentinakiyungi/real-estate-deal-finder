@@ -5,6 +5,7 @@
     python main.py find --max-price 400000 --neighborhood Riverside
     python main.py parse "3bd/2ba, 1,650 sq ft, built 1988, needs TLC, 2 car garage"
     python main.py evaluate                    # parser + deal-flag accuracy vs ground truth
+    python main.py build-site                  # refresh the static GitHub Pages site data (docs/data)
 
     streamlit run app.py                       # the web app
 
@@ -47,6 +48,13 @@ def cmd_find(a):
     print("report:", services.REPORT_DIR / "deal_report.html")
 
 
+def cmd_build_site(_):
+    from dealfinder.export import build_site
+    info = build_site()
+    print(f"Static site data written to {info['out']}: {info['homes']} homes, model {info['model_kb']} KB "
+          f"(matches scikit-learn exactly: max difference {info['max_rel_diff']:.1e})")
+
+
 def cmd_parse(a):
     f, meta = parse(a.text)
     print(json.dumps({"features": f.model_dump(), **meta}, indent=2))
@@ -84,5 +92,6 @@ if __name__ == "__main__":
     pp.add_argument("text")
     pp.set_defaults(fn=cmd_parse)
     sub.add_parser("evaluate").set_defaults(fn=cmd_evaluate)
+    sub.add_parser("build-site").set_defaults(fn=cmd_build_site)
     a = p.parse_args()
     a.fn(a)

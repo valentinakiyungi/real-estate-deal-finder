@@ -10,7 +10,7 @@ from __future__ import annotations
 import re
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError
 
 from . import llm
 
@@ -97,7 +97,19 @@ def parse_rules(text: str) -> ListingFeatures:
     else:
         f["condition"] = "good"
     f["red_flags"] = [k for k, pat in _RED.items() if re.search(pat, t)]
-    return ListingFeatures(**f)
+    return _validated(f)
+
+
+def _validated(f: dict) -> ListingFeatures:
+    """Build ListingFeatures, dropping any implausible value (e.g. a 60-acre 'lot') instead of failing."""
+    for _ in range(len(f) + 1):
+        try:
+            return ListingFeatures(**f)
+        except ValidationError as e:
+            for err in e.errors():
+                if err.get("loc"):
+                    f.pop(err["loc"][0], None)
+    return ListingFeatures()
 
 
 # ------------------------------------------------------------------- LLM ---

@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>DealScout: homes listed below what they're worth</title>
+  <meta name="description" content="DealScout reads home listings, estimates what each home is worth with a machine-learning model, and shows the ones priced below that, with the risks spelled out.">
+  <meta name="theme-color" content="#F5F7F6">
+  <meta property="og:title" content="DealScout: homes listed below what they're worth">
+  <meta property="og:description" content="Find under-priced homes. Price estimates, likely ranges and risk checks for every listing.">
+  <meta property="og:type" content="website">
+  <link rel="icon" type="image/png" href="assets/icon.png">
+  <link rel="apple-touch-icon" href="assets/icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@62..125,300..800&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+  <a class="skip" href="#app">Skip to content</a>
+  <header class="top">
+    <div class="top-inner">
+      <a class="brand" href="#/" aria-label="DealScout home">
+        <img src="assets/icon.png" alt="" width="30" height="30"><span>DealScout</span>
+      </a>
+      <nav class="nav-desktop" aria-label="Main"></nav>
+    </div>
+  </header>
+  <main id="app" tabindex="-1" aria-live="polite">
+    <p class="loading">Loading today's listings</p>
+  </main>
+  <nav class="tabbar" aria-label="Main"></nav>
+  <noscript><p class="wrap">DealScout needs JavaScript to show listings and run price checks.</p></noscript>
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>

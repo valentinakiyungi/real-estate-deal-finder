@@ -101,9 +101,23 @@ CSS = f"""
 .stButton button, .stDownloadButton button {{ border-radius: 4px; font-weight: 600; }}
 [data-testid="stVerticalBlockBorderWrapper"] {{ border-radius: 6px; }}
 footer {{ visibility: hidden; }}
+/* phones */
 @media (max-width: 640px) {{
-  .block-container {{ padding-left: 1rem; padding-right: 1rem; }}
-  .ds-hero {{ padding-top: 2rem; }}
+  .block-container {{ padding: 3.6rem 1rem 3rem; }}
+  .ds-hero {{ margin: 0 -1rem 1rem; padding: 1.6rem 1rem 1.6rem; background-size: 220% auto; }}
+  .ds-hero h1 {{ font-size: 2.25rem; }}
+  .ds-lede {{ font-size: 1.02rem; }}
+  .stApp h1 {{ font-size: 1.85rem; }}
+  .stApp h2 {{ font-size: 1.4rem; }}
+  .ds-price {{ font-size: 1.45rem; }}
+  .ds-step {{ margin-bottom: 0.4rem; }}
+  /* inside property cards keep the Details and Save buttons on one row */
+  [class*="st-key-card-"] [data-testid="stHorizontalBlock"] {{ flex-wrap: nowrap !important; gap: 0.5rem; }}
+  [class*="st-key-card-"] [data-testid="stColumn"] {{ min-width: 0 !important; width: auto !important;
+    flex: 1 1 0 !important; }}
+  /* bigger touch targets */
+  .stButton button, .stDownloadButton button, [data-testid="stPopover"] button {{ min-height: 2.75rem; }}
+  [data-testid="stMetricValue"] {{ font-size: 1.5rem; }}
 }}
 </style>
 """
